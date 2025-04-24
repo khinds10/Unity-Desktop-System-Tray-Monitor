@@ -37,7 +37,7 @@ sudo apt install radeontop
 1. Clone or download this repository:
 
 ```bash
-git clone https://github.com/yourusername/unity-sys-monitor.git
+git clone https://github.com/khinds10/Unity-Desktop-System-Tray-Monitor
 cd unity-sys-monitor
 ```
 
