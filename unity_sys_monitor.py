@@ -1,4 +1,42 @@
 #!/usr/bin/env python3
+"""
+Unity System Monitor
+-------------------
+A lightweight system monitoring indicator for Ubuntu/Unity desktop environments.
+Displays CPU, GPU, memory, disk, and network usage in the system tray.
+
+Features:
+- Real-time system resource monitoring
+- Support for AMD GPU monitoring (via radeontop)
+- CPU power profile control
+- Configurable update intervals
+- Monospace font display to prevent UI jumping
+
+License: MIT License
+Copyright (c) 2023-2024 Kevin Hinds
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Version: 1.0.0
+Author: Kevin Hinds
+GitHub: https://github.com/khinds10/Unity-Sys-Monitor
+"""
 
 import gi
 import psutil
@@ -19,14 +57,18 @@ class UnitySysMonitor:
         # Initialize running state first
         self.running = True
         
-        # Create the app indicator with a system icon
+        # Get the path to the icon file
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(script_dir, "icon.png")
+        
+        # Create the app indicator with the original icon
         self.indicator = AppIndicator3.Indicator.new(
             "unity-sys-monitor",
-            "utilities-system-monitor",  # Use a system icon that's guaranteed to exist
+            icon_path,  # Use the original icon.png file
             AppIndicator3.IndicatorCategory.SYSTEM_SERVICES
         )
         
-        # If icon doesn't exist, use a fallback
+        # Set indicator properties
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
         
         # Check for radeontop first
@@ -34,6 +76,12 @@ class UnitySysMonitor:
         self.radeontop_process = None
         self.radeontop_lock = threading.Lock()
         self.gpu_percent = 0
+        
+        # Check for power-profiles-daemon
+        self.has_power_profiles = self.check_power_profiles()
+        self.current_power_profile = "balanced"  # Default assumption
+        if self.has_power_profiles:
+            self.current_power_profile = self.get_current_power_profile()
         
         # Unicode symbols for the panel display
         self.cpu_symbol = "💻"  # Computer/CPU symbol
@@ -46,38 +94,64 @@ class UnitySysMonitor:
         self.menu = Gtk.Menu()
         
         # CPU label item with icon
-        self.cpu_item = Gtk.MenuItem()
-        self.cpu_item.set_label(f"{self.cpu_symbol} CPU: Initializing...")
+        self.cpu_item = self.create_monospace_menu_item(f"{self.cpu_symbol} CPU: Initializing...")
         self.cpu_item.set_sensitive(False)
         self.menu.append(self.cpu_item)
         
         # GPU label item with icon - only if radeontop is installed
         if self.has_radeontop:
-            self.gpu_item = Gtk.MenuItem()
-            self.gpu_item.set_label(f"{self.gpu_symbol} GPU: Initializing...")
+            self.gpu_item = self.create_monospace_menu_item(f"{self.gpu_symbol} GPU: Initializing...")
             self.gpu_item.set_sensitive(False)
             self.menu.append(self.gpu_item)
         
         # Memory label item with icon
-        self.mem_item = Gtk.MenuItem()
-        self.mem_item.set_label(f"{self.mem_symbol} Memory: Initializing...")
+        self.mem_item = self.create_monospace_menu_item(f"{self.mem_symbol} Memory: Initializing...")
         self.mem_item.set_sensitive(False)
         self.menu.append(self.mem_item)
         
         # Disk usage item with icon
-        self.disk_item = Gtk.MenuItem()
-        self.disk_item.set_label(f"{self.disk_symbol} Disk: Initializing...")
+        self.disk_item = self.create_monospace_menu_item(f"{self.disk_symbol} Disk: Initializing...")
         self.disk_item.set_sensitive(False)
         self.menu.append(self.disk_item)
         
         # Network item with icon
-        self.net_item = Gtk.MenuItem()
-        self.net_item.set_label(f"{self.net_symbol} Network: Initializing...")
+        self.net_item = self.create_monospace_menu_item(f"{self.net_symbol} Network: Initializing...")
         self.net_item.set_sensitive(False)
         self.menu.append(self.net_item)
         
         # Separator
         self.menu.append(Gtk.SeparatorMenuItem())
+        
+        # CPU Power Profile submenu
+        if self.has_power_profiles:
+            power_item = Gtk.MenuItem(label="CPU Power Profile")
+            power_submenu = Gtk.Menu()
+            
+            # Create power profile radio items
+            self.profile_items = {}
+            
+            # Create the first item - needed to create the radio group
+            profiles = ["performance", "balanced", "power-saver"]
+            first_profile = profiles[0]
+            first_item = Gtk.RadioMenuItem(label=first_profile.capitalize())
+            first_item.set_active(first_profile == self.current_power_profile)
+            first_item.connect("toggled", self.on_profile_toggled, first_profile)
+            self.profile_items[first_profile] = first_item
+            power_submenu.append(first_item)
+            
+            # Create the rest of the radio items in the same group
+            for profile in profiles[1:]:
+                item = Gtk.RadioMenuItem.new_with_label_from_widget(first_item, profile.capitalize())
+                item.set_active(profile == self.current_power_profile)
+                item.connect("toggled", self.on_profile_toggled, profile)
+                self.profile_items[profile] = item
+                power_submenu.append(item)
+            
+            power_item.set_submenu(power_submenu)
+            self.menu.append(power_item)
+            
+            # Separator
+            self.menu.append(Gtk.SeparatorMenuItem())
         
         # Preferences submenu
         prefs_item = Gtk.MenuItem(label="Preferences")
@@ -88,10 +162,15 @@ class UnitySysMonitor:
         interval_submenu = Gtk.Menu()
         
         # Update interval options
+        interval_group = None
         for interval in [1, 2, 5]:
-            item = Gtk.RadioMenuItem(label=f"{interval} seconds")
+            if interval_group is None:
+                item = Gtk.RadioMenuItem(label=f"{interval} seconds")
+                interval_group = item
+            else:
+                item = Gtk.RadioMenuItem.new_with_label_from_widget(interval_group, f"{interval} seconds")
             item.set_active(interval == 2)  # Default is 2
-            item.connect("activate", self.set_update_interval, interval)
+            item.connect("toggled", self.on_interval_toggled, interval)
             interval_submenu.append(item)
         
         interval_item.set_submenu(interval_submenu)
@@ -126,6 +205,20 @@ class UnitySysMonitor:
         self.update_thread.daemon = True
         self.update_thread.start()
     
+    def create_monospace_menu_item(self, text):
+        """Create a menu item with monospace font"""
+        item = Gtk.MenuItem()
+        label = Gtk.Label()
+        label.set_markup(f'<span font_family="monospace">{text}</span>')
+        label.set_xalign(0.0)  # Left-align text
+        item.add(label)
+        return item
+    
+    def update_monospace_menu_item(self, item, text):
+        """Update the label of a monospace menu item"""
+        label = item.get_child()
+        label.set_markup(f'<span font_family="monospace">{text}</span>')
+    
     def check_radeontop(self):
         """Check if radeontop is installed"""
         try:
@@ -133,6 +226,55 @@ class UnitySysMonitor:
             return True
         except subprocess.CalledProcessError:
             return False
+    
+    def check_power_profiles(self):
+        """Check if power-profiles-daemon is installed and running"""
+        try:
+            result = subprocess.run(
+                ["powerprofilesctl", "list"], 
+                check=True, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            return "balanced" in result.stdout
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
+    
+    def get_current_power_profile(self):
+        """Get the current power profile"""
+        try:
+            result = subprocess.run(
+                ["powerprofilesctl", "get"], 
+                check=True, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            # Remove leading/trailing whitespace
+            return result.stdout.strip()
+        except subprocess.CalledProcessError:
+            return "balanced"
+    
+    def on_profile_toggled(self, widget, profile):
+        """Handle radio menu item toggled signal for power profiles"""
+        if widget.get_active() and profile != self.current_power_profile:
+            try:
+                subprocess.run(
+                    ["pkexec", "powerprofilesctl", "set", profile], 
+                    check=True,
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE
+                )
+                self.current_power_profile = profile
+            except subprocess.CalledProcessError:
+                # If it fails, reset UI without triggering signals
+                GLib.idle_add(self.update_power_profile_ui)
+    
+    def on_interval_toggled(self, widget, interval):
+        """Handle radio menu item toggled signal for update interval"""
+        if widget.get_active():
+            self.update_interval = interval
     
     def start_radeontop(self):
         """Start radeontop as a continuous process"""
@@ -181,11 +323,6 @@ class UnitySysMonitor:
             with self.radeontop_lock:
                 self.has_radeontop = False
     
-    def set_update_interval(self, widget, interval):
-        """Set the update interval"""
-        if widget.get_active():
-            self.update_interval = interval
-    
     def update_stats(self):
         """Background thread to update system stats"""
         while self.running:
@@ -219,10 +356,44 @@ class UnitySysMonitor:
             self.prev_net_io = current_net_io
             self.prev_net_time = current_time
             
+            # Check if power profile has changed (every 10 seconds)
+            if self.has_power_profiles and hasattr(self, 'update_count'):
+                self.update_count += 1
+                if self.update_count >= 5:
+                    self.update_count = 0
+                    new_profile = self.get_current_power_profile()
+                    if new_profile != self.current_power_profile:
+                        self.current_power_profile = new_profile
+                        GLib.idle_add(self.update_power_profile_ui)
+            else:
+                self.update_count = 0
+            
             # Update labels in the main thread
             GLib.idle_add(self.update_labels, cpu_percent, gpu_percent, mem_percent, disk_percent, recv_speed, sent_speed)
             
             time.sleep(self.update_interval)
+    
+    def update_power_profile_ui(self):
+        """Update the power profile radio items"""
+        if hasattr(self, 'profile_items') and self.current_power_profile in self.profile_items:
+            for profile, item in self.profile_items.items():
+                # Temporarily block the "toggled" signal
+                handlers = []
+                for handler_id in item.handler_get_connections():
+                    if handler_id.callback_name == "on_profile_toggled":
+                        handlers.append(handler_id)
+                
+                for handler_id in handlers:
+                    item.handler_block(handler_id)
+                
+                # Set the active state based on current profile
+                item.set_active(profile == self.current_power_profile)
+                
+                # Unblock the signals
+                for handler_id in handlers:
+                    item.handler_unblock(handler_id)
+        
+        return False
     
     def format_bytes(self, bytes):
         """Format bytes to human-readable form"""
@@ -272,27 +443,36 @@ class UnitySysMonitor:
         cpu_formatted = self.format_percent(cpu_percent)
         
         # Update the indicator label with CPU, GPU (if available), and network stats with icons
-        # Add extra space after main icon
+        # We can't use markup in the indicator, so rely on fixed-width formatting
         panel_text = f"   {self.cpu_symbol} {cpu_formatted}"
+        
+        # Add power profile indicator if available
+        if self.has_power_profiles:
+            # Use symbols to indicate power profile
+            profile_symbol = "⚡" if self.current_power_profile == "performance" else \
+                            "⚖️" if self.current_power_profile == "balanced" else "🔋"
+            panel_text += f" {profile_symbol}"
         
         if self.has_radeontop:
             gpu_formatted = self.format_percent(gpu_percent)
             panel_text += f"    |    {self.gpu_symbol} {gpu_formatted}"
-            self.gpu_item.set_label(f"{self.gpu_symbol} GPU: {self.format_percent(gpu_percent)}")
+            self.update_monospace_menu_item(self.gpu_item, f"{self.gpu_symbol} GPU: {self.format_percent(gpu_percent)}")
         
         # Add extra space around network values and between download/upload
         panel_text += f"    |    {self.net_symbol} ↓{recv_fixed}     ↑{sent_fixed}"
+        
+        # Set the indicator label (no markup support)
         self.indicator.set_label(panel_text, "")
         
-        # Update menu items
-        self.cpu_item.set_label(f"{self.cpu_symbol} CPU: {self.format_percent(cpu_percent)}")
-        self.mem_item.set_label(f"{self.mem_symbol} Memory: {self.format_percent(mem_percent)}")
-        self.disk_item.set_label(f"{self.disk_symbol} Disk: {self.format_percent(disk_percent)}")
+        # Update menu items with monospace font
+        self.update_monospace_menu_item(self.cpu_item, f"{self.cpu_symbol} CPU: {self.format_percent(cpu_percent)}")
+        self.update_monospace_menu_item(self.mem_item, f"{self.mem_symbol} Memory: {self.format_percent(mem_percent)}")
+        self.update_monospace_menu_item(self.disk_item, f"{self.disk_symbol} Disk: {self.format_percent(disk_percent)}")
         
         # Use more detailed format for the menu
         recv_formatted = self.format_bytes(recv_speed)
         sent_formatted = self.format_bytes(sent_speed)
-        self.net_item.set_label(f"{self.net_symbol} Network: ↓ {recv_formatted} ↑ {sent_formatted}")
+        self.update_monospace_menu_item(self.net_item, f"{self.net_symbol} Network: ↓ {recv_formatted} ↑ {sent_formatted}")
         
         return False  # Required for GLib.idle_add
     
