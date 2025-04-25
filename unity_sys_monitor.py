@@ -35,7 +35,7 @@ SOFTWARE.
 
 Version: 1.0.0
 Author: Kevin Hinds
-GitHub: https://github.com/khinds10/Unity-Sys-Monitor
+GitHub: https://github.com/khinds10/Unity-Desktop-System-Tray-Monitor
 """
 
 import gi
@@ -169,7 +169,7 @@ class UnitySysMonitor:
                 interval_group = item
             else:
                 item = Gtk.RadioMenuItem.new_with_label_from_widget(interval_group, f"{interval} seconds")
-            item.set_active(interval == 2)  # Default is 2
+            item.set_active(interval == 1)  # Default is 1
             item.connect("toggled", self.on_interval_toggled, interval)
             interval_submenu.append(item)
         
@@ -190,7 +190,7 @@ class UnitySysMonitor:
         self.indicator.set_menu(self.menu)
         
         # Initialize update interval
-        self.update_interval = 2
+        self.update_interval = 1
         
         # Previous network stats for calculating rate
         self.prev_net_io = psutil.net_io_counters()

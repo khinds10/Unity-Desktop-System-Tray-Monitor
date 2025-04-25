@@ -5,7 +5,6 @@ A simple system resource monitor for the Unity desktop environment on Ubuntu.
 ## Features
 
 - Shows CPU, GPU, and network usage in the panel indicator
-- Fixed-width formatting prevents UI jumping as values change
 - Displays detailed information in a dropdown menu:
   - CPU usage percentage (with icon)
   - GPU usage percentage (with icon, AMD Radeon cards)
@@ -46,13 +45,6 @@ cd unity-sys-monitor
 ```bash
 chmod +x unity_sys_monitor.py
 ```
-
-3. Replace the placeholder icon files if desired:
-   - `cpu_icon.png`: Icon for CPU in the menu
-   - `gpu_icon.png`: Icon for GPU in the menu
-   - `memory_icon.png`: Icon for memory in the menu
-   - `disk_icon.png`: Icon for disk in the menu
-   - `network_icon.png`: Icon for network in the menu
 
 ## Usage
 
