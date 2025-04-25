@@ -442,8 +442,7 @@ class UnitySysMonitor:
         # Format percentages with fixed width
         cpu_formatted = self.format_percent(cpu_percent)
         
-        # Update the indicator label with CPU, GPU (if available), and network stats with icons
-        # We can't use markup in the indicator, so rely on fixed-width formatting
+        # Update the indicator label with ONLY CPU and power profile indicator
         panel_text = f"   {self.cpu_symbol} {cpu_formatted}"
         
         # Add power profile indicator if available
@@ -453,19 +452,15 @@ class UnitySysMonitor:
                             "⚖️" if self.current_power_profile == "balanced" else "🔋"
             panel_text += f" {profile_symbol}"
         
-        if self.has_radeontop:
-            gpu_formatted = self.format_percent(gpu_percent)
-            panel_text += f"    |    {self.gpu_symbol} {gpu_formatted}"
-            self.update_monospace_menu_item(self.gpu_item, f"{self.gpu_symbol} GPU: {self.format_percent(gpu_percent)}")
-        
-        # Add extra space around network values and between download/upload
-        panel_text += f"    |    {self.net_symbol} ↓{recv_fixed}     ↑{sent_fixed}"
-        
         # Set the indicator label (no markup support)
         self.indicator.set_label(panel_text, "")
         
         # Update menu items with monospace font
         self.update_monospace_menu_item(self.cpu_item, f"{self.cpu_symbol} CPU: {self.format_percent(cpu_percent)}")
+        
+        if self.has_radeontop:
+            self.update_monospace_menu_item(self.gpu_item, f"{self.gpu_symbol} GPU: {self.format_percent(gpu_percent)}")
+            
         self.update_monospace_menu_item(self.mem_item, f"{self.mem_symbol} Memory: {self.format_percent(mem_percent)}")
         self.update_monospace_menu_item(self.disk_item, f"{self.disk_symbol} Disk: {self.format_percent(disk_percent)}")
         
